@@ -3,7 +3,7 @@ Excel Export — styled like the example screenshot
 RTL layout, colored cells per employee, Hebrew headers
 """
 from datetime import date, timedelta
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -38,8 +38,12 @@ def export_to_excel(
     start_date: date,
     num_days: int,
     output_path: str = "משמרות.xlsx",
+    holidays: Optional[Dict[date, str]] = None,
 ):
     """Export schedule to a styled Excel file."""
+    if holidays is None:
+        holidays = {}
+
     wb = Workbook()
     ws = wb.active
     ws.title = "משמרות"
@@ -47,6 +51,9 @@ def export_to_excel(
 
     dates = [start_date + timedelta(days=i) for i in range(num_days)]
     colors = assign_colors(employees)
+
+    holiday_fill = PatternFill(start_color="FF4444", end_color="FF4444", fill_type="solid")
+    erev_hag_fill = PatternFill(start_color="FF8888", end_color="FF8888", fill_type="solid")
 
     # Styles
     header_font = Font(name="Arial", bold=True, size=12)
@@ -74,16 +81,25 @@ def export_to_excel(
 
     # Date columns
     for col_idx, d in enumerate(dates, start=2):
-        # Row 1: date + day name
-        cell = ws.cell(
-            row=1,
-            column=col_idx,
-            value=f"{d.strftime('%d.%m')}\n{get_day_name(d)}",
-        )
+        # Row 1: date + day name + holiday
+        holiday_name = holidays.get(d, "")
+        label = f"{d.strftime('%d.%m')}\n{get_day_name(d)}"
+        if holiday_name:
+            label += f"\n🔴 {holiday_name}"
+
+        cell = ws.cell(row=1, column=col_idx, value=label)
         cell.font = header_font
         cell.alignment = center_align
         cell.border = thin_border
-        cell.fill = PatternFill(start_color="D9E2F3", end_color="D9E2F3", fill_type="solid")
+
+        if holiday_name and "ערב" in holiday_name:
+            cell.fill = erev_hag_fill
+            cell.font = Font(name="Arial", bold=True, size=12, color="FFFFFF")
+        elif holiday_name:
+            cell.fill = holiday_fill
+            cell.font = Font(name="Arial", bold=True, size=12, color="FFFFFF")
+        else:
+            cell.fill = PatternFill(start_color="D9E2F3", end_color="D9E2F3", fill_type="solid")
 
     # --- Shift rows ---
     shift_labels = {
@@ -130,7 +146,7 @@ def export_to_excel(
         ws.column_dimensions[get_column_letter(col_idx)].width = 12
 
     # --- Row heights ---
-    ws.row_dimensions[1].height = 40
+    ws.row_dimensions[1].height = 55
     for row in range(2, 5):
         ws.row_dimensions[row].height = 50
 

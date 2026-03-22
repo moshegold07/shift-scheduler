@@ -52,6 +52,7 @@ def generate_schedule(
     start_date: date,
     num_days: int,
     constraints: Optional[Dict[str, List[Tuple[date, str]]]] = None,
+    max_weekly_points_override: Optional[Dict[str, int]] = None,
 ) -> Dict[Tuple[date, str], str]:
     """
     Generate a shift schedule.
@@ -61,12 +62,15 @@ def generate_schedule(
         start_date: First day of the schedule
         num_days: Number of days to schedule
         constraints: Dict mapping employee name -> list of (date, shift) they CANNOT do
+        max_weekly_points_override: Dict mapping employee name -> custom max weekly points
 
     Returns:
         Dict mapping (date, shift_type) -> employee_name
     """
     if constraints is None:
         constraints = {}
+    if max_weekly_points_override is None:
+        max_weekly_points_override = {}
 
     # Build constraint set for quick lookup: (employee, date, shift)
     constraint_set: Set[Tuple[str, date, str]] = set()
@@ -103,8 +107,9 @@ def generate_schedule(
                 if (emp, d, shift) in constraint_set:
                     continue
 
-                # Check weekly points limit
-                if weekly_points[week][emp] + cost > MAX_WEEKLY_POINTS:
+                # Check weekly points limit (per-employee override or global)
+                emp_max = max_weekly_points_override.get(emp, MAX_WEEKLY_POINTS)
+                if weekly_points[week][emp] + cost > emp_max:
                     continue
 
                 # Night shift rule: on the day of night shift, no other shifts
