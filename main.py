@@ -7,7 +7,7 @@ from scheduler import generate_schedule, print_schedule, MORNING, EVENING, NIGHT
 from excel_export import export_to_excel
 
 # === Configuration ===
-EMPLOYEES = ["ניר", "משה", "עומר", "אורי", "יהב"]
+EMPLOYEES = ["ניר", "משה", "עומר", "עומרי", "אורי", "יהב"]
 START_DATE = date(2026, 3, 15)  # 15.3 — ראשון
 NUM_DAYS = 14  # שבועיים
 
