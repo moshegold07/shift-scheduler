@@ -53,6 +53,9 @@ def generate_schedule(
     num_days: int,
     constraints: Optional[Dict[str, List[Tuple[date, str]]]] = None,
     max_weekly_points_override: Optional[Dict[str, int]] = None,
+    allow_double_shift: bool = False,
+    no_double_shift_weekday: Optional[int] = None,
+    ignore_constraints: bool = False,
 ) -> Dict[Tuple[date, str], str]:
     """
     Generate a shift schedule.
@@ -63,6 +66,9 @@ def generate_schedule(
         num_days: Number of days to schedule
         constraints: Dict mapping employee name -> list of (date, shift) they CANNOT do
         max_weekly_points_override: Dict mapping employee name -> custom max weekly points
+        allow_double_shift: If True, same employee can do 2 shifts in one day (e.g. morning+evening)
+        no_double_shift_weekday: weekday number (0=Mon..6=Sun) on which double shifts are forbidden
+        ignore_constraints: If True, employee constraints are ignored (used for "לשלישות" sheet)
 
     Returns:
         Dict mapping (date, shift_type) -> employee_name
@@ -74,9 +80,10 @@ def generate_schedule(
 
     # Build constraint set for quick lookup: (employee, date, shift)
     constraint_set: Set[Tuple[str, date, str]] = set()
-    for emp, blocked in constraints.items():
-        for d, s in blocked:
-            constraint_set.add((emp, d, s))
+    if not ignore_constraints:
+        for emp, blocked in constraints.items():
+            for d, s in blocked:
+                constraint_set.add((emp, d, s))
 
     dates = [start_date + timedelta(days=i) for i in range(num_days)]
 
@@ -96,6 +103,8 @@ def generate_schedule(
         """Check non-points constraints (night rules, explicit blocks)."""
         if (emp, d, shift) in constraint_set:
             return False
+
+        # Night shift rules always apply (safety)
         if shift != NIGHT and night_assignments.get(d) == emp:
             return False
         if shift == NIGHT:
@@ -104,6 +113,15 @@ def generate_schedule(
         yesterday = d - timedelta(days=1)
         if night_assignments.get(yesterday) == emp:
             return False
+
+        # Double-shift guard: same employee can't do 2 non-night shifts in one day
+        # unless allow_double_shift is on (and not on the restricted weekday)
+        if not allow_double_shift or (no_double_shift_weekday is not None and d.weekday() == no_double_shift_weekday):
+            if shift != NIGHT:
+                for other_shift in (MORNING, EVENING):
+                    if other_shift != shift and schedule.get((d, other_shift)) == emp:
+                        return False
+
         return True
 
     def _remaining_slots(emp, current_date, week):

@@ -71,27 +71,46 @@ MAX_WEEKLY_OVERRIDE = {
     "יהב": 1,
 }
 
-# === Generate ===
-print("🔄 מייצר לוח משמרות לשבוע 29.3 - 4.4.2026...")
-print("📅 ערב פסח: 1.4 (רביעי) | פסח: 2.4 (חמישי)")
-print()
-
-schedule = generate_schedule(
+# === Generate — Internal sheet (פנימי) ===
+# With constraints, double shifts allowed (except Friday = weekday 4)
+print("🔄 מייצר לוח פנימי (עם אילוצים, אפשר 2 משמרות ביום חוץ מיום שישי)...")
+schedule_internal = generate_schedule(
     employees=EMPLOYEES,
     start_date=START_DATE,
     num_days=NUM_DAYS,
     constraints=CONSTRAINTS,
     max_weekly_points_override=MAX_WEEKLY_OVERRIDE,
+    allow_double_shift=True,
+    no_double_shift_weekday=4,  # Friday
 )
 
+# === Generate — External sheet (לשלישות) ===
+# No constraints, no double shifts in same day
+print("🔄 מייצר לוח לשלישות (ללא אילוצים, ללא 2 משמרות ביום)...")
+schedule_external = generate_schedule(
+    employees=EMPLOYEES,
+    start_date=START_DATE,
+    num_days=NUM_DAYS,
+    constraints=CONSTRAINTS,
+    max_weekly_points_override=MAX_WEEKLY_OVERRIDE,
+    allow_double_shift=False,
+    ignore_constraints=True,
+)
+
+print()
+
 # === Print to console ===
-print("📋 לוח משמרות:")
-print_schedule(schedule, START_DATE, NUM_DAYS)
+print("📋 לוח פנימי:")
+print_schedule(schedule_internal, START_DATE, NUM_DAYS)
+print()
+print("📋 לוח לשלישות:")
+print_schedule(schedule_external, START_DATE, NUM_DAYS)
 
 # === Export to Excel ===
 output_file = "/root/shift-scheduler/משמרות_29.3-4.4.xlsx"
 export_to_excel(
-    schedule=schedule,
+    schedule_internal=schedule_internal,
+    schedule_external=schedule_external,
     employees=EMPLOYEES,
     start_date=START_DATE,
     num_days=NUM_DAYS,
@@ -104,14 +123,14 @@ print(f"\n✅ קובץ אקסל נשמר: {output_file}")
 from scheduler import SHIFT_COST, SHIFTS
 from datetime import timedelta
 
-print("\n📊 סיכום נקודות:")
+print("\n📊 סיכום נקודות (פנימי):")
 for emp in EMPLOYEES:
     total = 0
     shifts_list = []
     for i in range(NUM_DAYS):
         d = START_DATE + timedelta(days=i)
         for shift in SHIFTS:
-            if schedule.get((d, shift)) == emp:
+            if schedule_internal.get((d, shift)) == emp:
                 total += SHIFT_COST[shift]
                 shifts_list.append(f"{d.strftime('%d.%m')} {shift}")
     print(f"  {emp}: {total} נקודות — {', '.join(shifts_list)}")
