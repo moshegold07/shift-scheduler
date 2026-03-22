@@ -102,67 +102,53 @@ def generate_schedule(
             cost = SHIFT_COST[shift]
             candidates = []
 
-            for emp in employees:
-                # Check explicit constraints
+            def _can_work(emp, d, shift):
+                """Check non-points constraints (night rules, explicit blocks)."""
                 if (emp, d, shift) in constraint_set:
-                    continue
-
-                # Check weekly points limit (per-employee override or global)
-                emp_max = max_weekly_points_override.get(emp, MAX_WEEKLY_POINTS)
-                if weekly_points[week][emp] + cost > emp_max:
-                    continue
-
-                # Night shift rule: on the day of night shift, no other shifts
+                    return False
                 if shift != NIGHT and night_assignments.get(d) == emp:
-                    continue
-
-                # Night shift rule: if this IS a night shift, employee can't have
-                # done morning or evening today
+                    return False
                 if shift == NIGHT:
                     if schedule.get((d, MORNING)) == emp or schedule.get((d, EVENING)) == emp:
-                        continue
-
-                # After night shift: no shifts the next day
+                        return False
                 yesterday = d - timedelta(days=1)
                 if night_assignments.get(yesterday) == emp:
-                    continue
+                    return False
+                return True
 
-                # Night shift rule: on the day of night shift, no other shifts
-                # Check if employee is already assigned to night tonight
-                # (night is last in SHIFTS order, so check if assigned to morning/evening)
-                if shift == NIGHT:
-                    for other_shift in [MORNING, EVENING]:
-                        if schedule.get((d, other_shift)) == emp:
-                            break
-                    else:
-                        candidates.append(emp)
+            # Tier 1: employees under their weekly target (5 or override)
+            # Tier 2: employees at target but can stretch to target+1 (6 or override+1)
+            # Tier 3: fallback — anyone who can physically work (ignore points)
+            for emp in employees:
+                if not _can_work(emp, d, shift):
                     continue
-
-                candidates.append(emp)
+                emp_max = max_weekly_points_override.get(emp, MAX_WEEKLY_POINTS)
+                if weekly_points[week][emp] + cost <= emp_max:
+                    candidates.append(emp)
 
             if not candidates:
-                # Fallback: try anyone (relaxing weekly limit)
+                # Tier 2: allow +1 over target (e.g., 6 for regular, override+1 for custom)
                 for emp in employees:
-                    can_do = True
-                    if (emp, d, shift) in constraint_set:
-                        can_do = False
-                    if shift != NIGHT and night_assignments.get(d) == emp:
-                        can_do = False
-                    if shift == NIGHT and (schedule.get((d, MORNING)) == emp or schedule.get((d, EVENING)) == emp):
-                        can_do = False
-                    yesterday = d - timedelta(days=1)
-                    if night_assignments.get(yesterday) == emp:
-                        can_do = False
-                    if can_do:
+                    if not _can_work(emp, d, shift):
+                        continue
+                    emp_max = max_weekly_points_override.get(emp, MAX_WEEKLY_POINTS)
+                    if weekly_points[week][emp] + cost <= emp_max + 1:
+                        candidates.append(emp)
+
+            if not candidates:
+                # Tier 3: last resort — ignore points entirely
+                for emp in employees:
+                    if _can_work(emp, d, shift):
                         candidates.append(emp)
 
             if not candidates:
                 schedule[(d, shift)] = "❌ אין זמין"
                 continue
 
-            # Pick candidate with lowest total points (fairness), with randomness for ties
+            # Pick candidate with lowest weekly points first (enforce 5 before allowing 6),
+            # then by total points for overall fairness
             random.shuffle(candidates)
-            candidates.sort(key=lambda e: total_points[e])
+            candidates.sort(key=lambda e: (weekly_points[week][e], total_points[e]))
             chosen = candidates[0]
 
             schedule[(d, shift)] = chosen
