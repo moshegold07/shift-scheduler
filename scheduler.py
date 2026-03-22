@@ -92,6 +92,33 @@ def generate_schedule(
     # Track total points for fairness
     total_points: Dict[str, int] = {emp: 0 for emp in employees}
 
+    def _can_work(emp, d, shift):
+        """Check non-points constraints (night rules, explicit blocks)."""
+        if (emp, d, shift) in constraint_set:
+            return False
+        if shift != NIGHT and night_assignments.get(d) == emp:
+            return False
+        if shift == NIGHT:
+            if schedule.get((d, MORNING)) == emp or schedule.get((d, EVENING)) == emp:
+                return False
+        yesterday = d - timedelta(days=1)
+        if night_assignments.get(yesterday) == emp:
+            return False
+        return True
+
+    def _remaining_slots(emp, current_date, week):
+        """Count how many shift slots remain for this employee from current_date to end of week."""
+        slots = 0
+        week_start = start_date + timedelta(days=week * 7)
+        week_end_day = min(week_start + timedelta(days=6), start_date + timedelta(days=num_days - 1))
+        d = current_date
+        while d <= week_end_day:
+            for s in SHIFTS:
+                if _can_work(emp, d, s) and (d, s) not in schedule:
+                    slots += SHIFT_COST[s]
+            d += timedelta(days=1)
+        return slots
+
     # Schedule day by day, shift by shift
     for d in dates:
         week = get_week_number(d, start_date)
@@ -101,20 +128,6 @@ def generate_schedule(
         for shift in SHIFTS:
             cost = SHIFT_COST[shift]
             candidates = []
-
-            def _can_work(emp, d, shift):
-                """Check non-points constraints (night rules, explicit blocks)."""
-                if (emp, d, shift) in constraint_set:
-                    return False
-                if shift != NIGHT and night_assignments.get(d) == emp:
-                    return False
-                if shift == NIGHT:
-                    if schedule.get((d, MORNING)) == emp or schedule.get((d, EVENING)) == emp:
-                        return False
-                yesterday = d - timedelta(days=1)
-                if night_assignments.get(yesterday) == emp:
-                    return False
-                return True
 
             # Tier 1: employees under their weekly target (5 or override)
             # Tier 2: employees at target but can stretch to target+1 (6 or override+1)
@@ -145,10 +158,20 @@ def generate_schedule(
                 schedule[(d, shift)] = "❌ אין זמין"
                 continue
 
-            # Pick candidate with lowest weekly points first (enforce 5 before allowing 6),
-            # then by total points for overall fairness
+            # Prioritize employees who have fewer remaining opportunities to reach target.
+            # "urgency" = how much they still need vs how many slots remain.
+            # Higher urgency = should be assigned first.
+            def sort_key(e):
+                emp_max = max_weekly_points_override.get(e, MAX_WEEKLY_POINTS)
+                still_needed = max(0, emp_max - weekly_points[week][e])
+                remaining = _remaining_slots(e, d, week)
+                # Urgency: needed/remaining ratio (higher = more urgent, should come first)
+                # Use negative so sort ascending puts most urgent first
+                urgency = -(still_needed / max(remaining, 1))
+                return (urgency, weekly_points[week][e], total_points[e])
+
             random.shuffle(candidates)
-            candidates.sort(key=lambda e: (weekly_points[week][e], total_points[e]))
+            candidates.sort(key=sort_key)
             chosen = candidates[0]
 
             schedule[(d, shift)] = chosen
