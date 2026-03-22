@@ -82,6 +82,9 @@ schedule_internal = generate_schedule(
     max_weekly_points_override=MAX_WEEKLY_OVERRIDE,
     allow_double_shift=True,
     no_double_shift_weekday=4,  # Friday
+    max_weekly_nights=1,
+    night_overflow_preference=["אורי"],  # אם חייבים 2 לילות — מועדף אורי
+    gap_fill_employees=["יהב"],          # יהב ממלא חורים רק כשכולם ב-5
 )
 
 # === Generate — External sheet (לשלישות) ===
@@ -95,6 +98,9 @@ schedule_external = generate_schedule(
     max_weekly_points_override=MAX_WEEKLY_OVERRIDE,
     allow_double_shift=False,
     ignore_constraints=True,
+    max_weekly_nights=1,
+    night_overflow_preference=["אורי"],
+    gap_fill_employees=["יהב"],
 )
 
 print()

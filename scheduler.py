@@ -56,6 +56,9 @@ def generate_schedule(
     allow_double_shift: bool = False,
     no_double_shift_weekday: Optional[int] = None,
     ignore_constraints: bool = False,
+    max_weekly_nights: int = 1,
+    night_overflow_preference: Optional[List[str]] = None,
+    gap_fill_employees: Optional[List[str]] = None,
 ) -> Dict[Tuple[date, str], str]:
     """
     Generate a shift schedule.
@@ -69,6 +72,10 @@ def generate_schedule(
         allow_double_shift: If True, same employee can do 2 shifts in one day (e.g. morning+evening)
         no_double_shift_weekday: weekday number (0=Mon..6=Sun) on which double shifts are forbidden
         ignore_constraints: If True, employee constraints are ignored (used for "לשלישות" sheet)
+        max_weekly_nights: Max night shifts per employee per week (default 1, hard cap 2)
+        night_overflow_preference: Employees preferred for a 2nd night if needed (e.g. ["אורי"])
+        gap_fill_employees: Employees allowed to fill open slots when all others are at their target
+                            (e.g. ["יהב"] — used only when there is no other option)
 
     Returns:
         Dict mapping (date, shift_type) -> employee_name
@@ -77,6 +84,10 @@ def generate_schedule(
         constraints = {}
     if max_weekly_points_override is None:
         max_weekly_points_override = {}
+    if night_overflow_preference is None:
+        night_overflow_preference = []
+    if gap_fill_employees is None:
+        gap_fill_employees = []
 
     # Build constraint set for quick lookup: (employee, date, shift)
     constraint_set: Set[Tuple[str, date, str]] = set()
@@ -95,6 +106,9 @@ def generate_schedule(
 
     # Track who did night shift on which date
     night_assignments: Dict[date, str] = {}
+
+    # Track weekly night count per employee: week_number -> employee -> nights
+    weekly_nights: Dict[int, Dict[str, int]] = {}
 
     # Track total points for fairness
     total_points: Dict[str, int] = {emp: 0 for emp in employees}
@@ -137,37 +151,83 @@ def generate_schedule(
             d += timedelta(days=1)
         return slots
 
+    def _night_ok(emp, week):
+        """Check whether emp is allowed another night this week."""
+        nights_done = weekly_nights.get(week, {}).get(emp, 0)
+        if nights_done == 0:
+            return True
+        if nights_done >= 2:
+            return False
+        # nights_done == 1 → allowed only if emp is in overflow preference list
+        return emp in night_overflow_preference
+
     # Schedule day by day, shift by shift
     for d in dates:
         week = get_week_number(d, start_date)
         if week not in weekly_points:
             weekly_points[week] = {emp: 0 for emp in employees}
+        if week not in weekly_nights:
+            weekly_nights[week] = {emp: 0 for emp in employees}
 
         for shift in SHIFTS:
             cost = SHIFT_COST[shift]
             candidates = []
 
-            # Tier 1: employees under their weekly target (5 or override)
-            # Tier 2: employees at target but can stretch to target+1 (6 or override+1)
-            # Tier 3: fallback — anyone who can physically work (ignore points)
-            for emp in employees:
+            # For night shifts also enforce the weekly night cap
+            def _eligible_for_shift(emp):
                 if not _can_work(emp, d, shift):
+                    return False
+                if shift == NIGHT and not _night_ok(emp, week):
+                    return False
+                return True
+
+            # Tier 1: employees under their weekly points target (5 or override)
+            # Gap-fill employees (e.g. יהב) are excluded from Tier 1 unless
+            # everyone else is already at their target (handled in Tier 1b below).
+            regular_employees = [e for e in employees if e not in gap_fill_employees]
+
+            for emp in regular_employees:
+                if not _eligible_for_shift(emp):
                     continue
                 emp_max = max_weekly_points_override.get(emp, MAX_WEEKLY_POINTS)
                 if weekly_points[week][emp] + cost <= emp_max:
                     candidates.append(emp)
 
             if not candidates:
-                # Tier 2: allow +1 over target (e.g., 6 for regular, override+1 for custom)
-                for emp in employees:
-                    if not _can_work(emp, d, shift):
+                # Tier 1b: all regular employees are at/over target — allow gap-fill employees
+                for emp in gap_fill_employees:
+                    if not _eligible_for_shift(emp):
+                        continue
+                    emp_max = max_weekly_points_override.get(emp, MAX_WEEKLY_POINTS)
+                    if weekly_points[week][emp] + cost <= emp_max:
+                        candidates.append(emp)
+
+            if not candidates:
+                # Tier 2: allow +1 over target for regular employees
+                for emp in regular_employees:
+                    if not _eligible_for_shift(emp):
                         continue
                     emp_max = max_weekly_points_override.get(emp, MAX_WEEKLY_POINTS)
                     if weekly_points[week][emp] + cost <= emp_max + 1:
                         candidates.append(emp)
 
             if not candidates:
-                # Tier 3: last resort — ignore points entirely
+                # Tier 2b: allow gap-fill employees +1 as well
+                for emp in gap_fill_employees:
+                    if not _eligible_for_shift(emp):
+                        continue
+                    emp_max = max_weekly_points_override.get(emp, MAX_WEEKLY_POINTS)
+                    if weekly_points[week][emp] + cost <= emp_max + 1:
+                        candidates.append(emp)
+
+            if not candidates:
+                # Tier 3: last resort — ignore points entirely (but keep night cap)
+                for emp in employees:
+                    if _eligible_for_shift(emp):
+                        candidates.append(emp)
+
+            if not candidates:
+                # Tier 4: absolute last resort — ignore night cap too
                 for emp in employees:
                     if _can_work(emp, d, shift):
                         candidates.append(emp)
@@ -176,17 +236,22 @@ def generate_schedule(
                 schedule[(d, shift)] = "❌ אין זמין"
                 continue
 
-            # Prioritize employees who have fewer remaining opportunities to reach target.
-            # "urgency" = how much they still need vs how many slots remain.
-            # Higher urgency = should be assigned first.
+            # Sort: urgency first (fewer remaining opportunities), then points, then total
             def sort_key(e):
                 emp_max = max_weekly_points_override.get(e, MAX_WEEKLY_POINTS)
                 still_needed = max(0, emp_max - weekly_points[week][e])
                 remaining = _remaining_slots(e, d, week)
-                # Urgency: needed/remaining ratio (higher = more urgent, should come first)
-                # Use negative so sort ascending puts most urgent first
                 urgency = -(still_needed / max(remaining, 1))
-                return (urgency, weekly_points[week][e], total_points[e])
+                # For night shifts: prefer employees with 0 nights done this week,
+                # then overflow-preference employees, then others
+                night_penalty = 0
+                if shift == NIGHT:
+                    nights_done = weekly_nights[week].get(e, 0)
+                    is_preferred = 1 if e in night_overflow_preference else 2
+                    night_penalty = (nights_done, is_preferred)
+                else:
+                    night_penalty = (0, 0)
+                return (night_penalty, urgency, weekly_points[week][e], total_points[e])
 
             random.shuffle(candidates)
             candidates.sort(key=sort_key)
@@ -198,6 +263,7 @@ def generate_schedule(
 
             if shift == NIGHT:
                 night_assignments[d] = chosen
+                weekly_nights[week][chosen] = weekly_nights[week].get(chosen, 0) + 1
 
     return schedule
 
