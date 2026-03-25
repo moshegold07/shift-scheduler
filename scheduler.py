@@ -59,6 +59,9 @@ def generate_schedule(
     max_weekly_nights: int = 1,
     night_overflow_preference: Optional[List[str]] = None,
     gap_fill_employees: Optional[List[str]] = None,
+    fixed_assignments: Optional[Dict[Tuple[date, str], str]] = None,
+    employee_start_date: Optional[Dict[str, date]] = None,
+    excluded_employees: Optional[List[str]] = None,
 ) -> Dict[Tuple[date, str], str]:
     """
     Generate a shift schedule.
@@ -76,6 +79,9 @@ def generate_schedule(
         night_overflow_preference: Employees preferred for a 2nd night if needed (e.g. ["אורי"])
         gap_fill_employees: Employees allowed to fill open slots when all others are at their target
                             (e.g. ["יהב"] — used only when there is no other option)
+        fixed_assignments: Dict mapping (date, shift) -> employee for pre-assigned slots
+        employee_start_date: Dict mapping employee -> first date they're available
+        excluded_employees: List of employees to exclude entirely from scheduling
 
     Returns:
         Dict mapping (date, shift_type) -> employee_name
@@ -88,6 +94,15 @@ def generate_schedule(
         night_overflow_preference = []
     if gap_fill_employees is None:
         gap_fill_employees = []
+    if fixed_assignments is None:
+        fixed_assignments = {}
+    if employee_start_date is None:
+        employee_start_date = {}
+    if excluded_employees is None:
+        excluded_employees = []
+
+    # Filter out excluded employees
+    active_employees = [e for e in employees if e not in excluded_employees]
 
     # Build constraint set for quick lookup: (employee, date, shift)
     constraint_set: Set[Tuple[str, date, str]] = set()
@@ -111,10 +126,29 @@ def generate_schedule(
     weekly_nights: Dict[int, Dict[str, int]] = {}
 
     # Track total points for fairness
-    total_points: Dict[str, int] = {emp: 0 for emp in employees}
+    total_points: Dict[str, int] = {emp: 0 for emp in active_employees}
+
+    # Pre-populate fixed assignments
+    for (fd, fs), femp in fixed_assignments.items():
+        schedule[(fd, fs)] = femp
+        week = get_week_number(fd, start_date)
+        if week not in weekly_points:
+            weekly_points[week] = {emp: 0 for emp in active_employees}
+        if week not in weekly_nights:
+            weekly_nights[week] = {emp: 0 for emp in active_employees}
+        cost = SHIFT_COST[fs]
+        weekly_points[week][femp] = weekly_points[week].get(femp, 0) + cost
+        total_points[femp] = total_points.get(femp, 0) + cost
+        if fs == NIGHT:
+            night_assignments[fd] = femp
+            weekly_nights[week][femp] = weekly_nights[week].get(femp, 0) + 1
 
     def _can_work(emp, d, shift):
         """Check non-points constraints (night rules, explicit blocks)."""
+        if emp in excluded_employees:
+            return False
+        if emp in employee_start_date and d < employee_start_date[emp]:
+            return False
         if (emp, d, shift) in constraint_set:
             return False
 
@@ -165,11 +199,15 @@ def generate_schedule(
     for d in dates:
         week = get_week_number(d, start_date)
         if week not in weekly_points:
-            weekly_points[week] = {emp: 0 for emp in employees}
+            weekly_points[week] = {emp: 0 for emp in active_employees}
         if week not in weekly_nights:
-            weekly_nights[week] = {emp: 0 for emp in employees}
+            weekly_nights[week] = {emp: 0 for emp in active_employees}
 
         for shift in SHIFTS:
+            # Skip if already assigned (fixed assignment)
+            if (d, shift) in schedule:
+                continue
+
             cost = SHIFT_COST[shift]
             candidates = []
 
@@ -184,7 +222,7 @@ def generate_schedule(
             # Tier 1: employees under their weekly points target (5 or override)
             # Gap-fill employees (e.g. יהב) are excluded from Tier 1 unless
             # everyone else is already at their target (handled in Tier 1b below).
-            regular_employees = [e for e in employees if e not in gap_fill_employees]
+            regular_employees = [e for e in active_employees if e not in gap_fill_employees]
 
             for emp in regular_employees:
                 if not _eligible_for_shift(emp):
@@ -222,13 +260,13 @@ def generate_schedule(
 
             if not candidates:
                 # Tier 3: last resort — ignore points entirely (but keep night cap)
-                for emp in employees:
+                for emp in active_employees:
                     if _eligible_for_shift(emp):
                         candidates.append(emp)
 
             if not candidates:
                 # Tier 4: absolute last resort — ignore night cap too
-                for emp in employees:
+                for emp in active_employees:
                     if _can_work(emp, d, shift):
                         candidates.append(emp)
 

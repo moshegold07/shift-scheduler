@@ -178,14 +178,26 @@ def export_to_excel(
     num_days: int,
     output_path: str = "משמרות.xlsx",
     holidays: Optional[Dict[date, str]] = None,
+    external_overrides: Optional[Dict[Tuple[date, str], str]] = None,
 ):
     """
     Export two schedules to a single Excel file with two sheets:
       - "לשלישות"  — external/distributed schedule (no double shifts per employee per day)
       - "פנימי"    — internal schedule (double shifts allowed except on Friday)
+
+    external_overrides: Dict mapping (date, shift) -> employee
+        Used to force specific assignments on the external sheet only.
     """
     if holidays is None:
         holidays = {}
+    if external_overrides is None:
+        external_overrides = {}
+
+    # Apply overrides to external schedule
+    if external_overrides:
+        schedule_external = dict(schedule_external)  # copy
+        for (d, shift), emp in external_overrides.items():
+            schedule_external[(d, shift)] = emp
 
     wb = Workbook()
     colors = assign_colors(employees)
