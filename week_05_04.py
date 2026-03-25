@@ -52,12 +52,26 @@ FIXED_ASSIGNMENTS = {
     (THU, NIGHT): "משה",
     # עומר — שישי לילה
     (FRI, NIGHT): "עומר",
+    # שישי — ניר בוקר+ערב (הזמין היחיד, חריג double shift בשישי)
+    (FRI, MORNING): "ניר",
+    (FRI, EVENING): "ניר",
+    # שבת בוקר — ניר (היחיד שזמין, double shift מותר בשבת)
+    (SAT, MORNING): "ניר",
+    # שבת לילה — ניר
+    (SAT, NIGHT): "ניר",
 }
 
 # === Employee start dates (עובדים חלקיים) ===
 EMPLOYEE_START_DATE = {
     "אורי הלוי": WED,  # מצטרף רק מרביעי
 }
+
+# אורי הלוי — חסום בשישי ושבת (רק רביעי בפועל, השאר אוטומטי)
+AORI_HALEVI_BLOCKED = [
+    (FRI, MORNING), (FRI, EVENING), (FRI, NIGHT),
+    (SAT, MORNING), (SAT, EVENING), (SAT, NIGHT),
+    (THU, MORNING), (THU, EVENING), (THU, NIGHT),
+]
 
 # === Excluded employees ===
 EXCLUDED = ["יהב"]  # לא עובד השבוע
@@ -90,7 +104,7 @@ TSARFATI_ALLOWED = {
 CONSTRAINTS = {
     # צרפתי — רק ראשון לילה + שלישי בוקר
     "צרפתי": build_whitelist_constraints(TSARFATI_ALLOWED),
-    # משה — לא רביעי, לא שישי
+    # משה — לא רביעי, לא שישי, שבת רק ערב
     "משה": [
         (WED, MORNING),
         (WED, EVENING),
@@ -98,6 +112,8 @@ CONSTRAINTS = {
         (FRI, MORNING),
         (FRI, EVENING),
         (FRI, NIGHT),
+        (SAT, MORNING),
+        (SAT, NIGHT),
     ],
     # עומר — עדיף לא ראשון בוקר+ערב, לא שני לילה, לא שלישי כלל, עדיף לא רביעי ערב
     "עומר": [
@@ -116,6 +132,8 @@ CONSTRAINTS = {
     ],
     # עומרי — כל מה שלא ברשימת המותר
     "עומרי": build_whitelist_constraints(OMRI_ALLOWED),
+    # אורי הלוי — רק רביעי (ערב+לילה קבועים, חוסמים שאר הימים)
+    "אורי הלוי": AORI_HALEVI_BLOCKED,
 }
 
 # === Generate — Internal sheet (פנימי) ===
@@ -185,6 +203,7 @@ for i in range(NUM_DAYS):
 EXTERNAL_OVERRIDES = {
     (SAT, EVENING): "אורי הלוי",   # ערב רביעי של אורי הלוי → נפרס לשבת
     (WED, EVENING): "עומר",          # מילוי החור שנוצר ברביעי ערב
+    (FRI, MORNING): "ניר",           # ניר גם בוקר בשישי (כמו פנימי)
 }
 
 # מחילים את ה-overrides על הלוח הלשלישות (גם להדפסה וגם לאקסל)
