@@ -11,7 +11,7 @@
 אילוצים:
 - משה: לא רביעי (1.4), לא שישי (3.4). חמישי לילה = שיבוץ קבוע.
 - עומר: עדיף לא ראשון בוקר+ערב, לא שני לילה, לא שלישי כלל, עדיף לא רביעי ערב.
-- צרפתי: ראשון לא בוקר, שני לא בוקר+ערב, שלישי לא ערב
+- צרפתי: רק ראשון לילה + שלישי בוקר (נסגר הצו בשלישי בלילה)
 - עומרי: יכול רק: ראשון ערב, שני בוקר, שלישי לילה, חמישי ערב. השאר חסום.
 - ניר: הכל חוץ מרביעי ערב+לילה
 - אורי הלוי: מרביעי בלבד. שיבוץ קבוע: רביעי ערב+לילה.
@@ -50,6 +50,8 @@ FIXED_ASSIGNMENTS = {
     (WED, NIGHT): "אורי הלוי",
     # משה — חמישי לילה
     (THU, NIGHT): "משה",
+    # עומר — שישי לילה
+    (FRI, NIGHT): "עומר",
 }
 
 # === Employee start dates (עובדים חלקיים) ===
@@ -61,29 +63,33 @@ EMPLOYEE_START_DATE = {
 EXCLUDED = ["יהב"]  # לא עובד השבוע
 
 # === Constraints ===
-# עומרי — יכול רק משמרות ספציפיות, חוסמים את כל השאר
+# פונקציית עזר — בונה רשימת אילוצים מתוך whitelist (חוסם הכל חוץ מהמותר)
+def build_whitelist_constraints(allowed_set):
+    blocked = []
+    for i in range(NUM_DAYS):
+        d = START_DATE + timedelta(days=i)
+        for shift in SHIFTS:
+            if (d, shift) not in allowed_set:
+                blocked.append((d, shift))
+    return blocked
+
+# עומרי — יכול רק משמרות ספציפיות
 OMRI_ALLOWED = {
     (SUN, EVENING),    # ראשון ערב
     (MON, MORNING),    # שני בוקר
     (TUE, NIGHT),      # שלישי לילה
     (THU, EVENING),    # חמישי ערב
 }
-# בונים אילוצים לעומרי — חוסמים כל מה שלא ברשימה
-omri_constraints = []
-for i in range(NUM_DAYS):
-    d = START_DATE + timedelta(days=i)
-    for shift in SHIFTS:
-        if (d, shift) not in OMRI_ALLOWED:
-            omri_constraints.append((d, shift))
+
+# צרפתי — רק ראשון לילה + שלישי בוקר (נסגר הצו בשלישי בלילה)
+TSARFATI_ALLOWED = {
+    (SUN, NIGHT),      # ראשון לילה
+    (TUE, MORNING),    # שלישי בוקר
+}
 
 CONSTRAINTS = {
-    # צרפתי — אילוצים קבועים (כמו אורי הישן)
-    "צרפתי": [
-        (SUN, MORNING),          # ראשון: לומד 10-15 → לא בוקר
-        (MON, MORNING),          # שני: 12-20 → לא בוקר
-        (MON, EVENING),          # שני: 12-20 → לא ערב
-        (TUE, EVENING),          # שלישי: 15-20 → לא ערב
-    ],
+    # צרפתי — רק ראשון לילה + שלישי בוקר
+    "צרפתי": build_whitelist_constraints(TSARFATI_ALLOWED),
     # משה — לא רביעי, לא שישי
     "משה": [
         (WED, MORNING),
@@ -109,7 +115,7 @@ CONSTRAINTS = {
         (WED, NIGHT),
     ],
     # עומרי — כל מה שלא ברשימת המותר
-    "עומרי": omri_constraints,
+    "עומרי": build_whitelist_constraints(OMRI_ALLOWED),
 }
 
 # === Generate — Internal sheet (פנימי) ===
@@ -122,7 +128,6 @@ schedule_internal = generate_schedule(
     allow_double_shift=True,
     no_double_shift_weekday=4,  # Friday
     max_weekly_nights=1,
-    night_overflow_preference=["צרפתי"],
     fixed_assignments=FIXED_ASSIGNMENTS,
     employee_start_date=EMPLOYEE_START_DATE,
     excluded_employees=EXCLUDED,
@@ -178,7 +183,8 @@ for i in range(NUM_DAYS):
 # === External overrides ===
 # בגליון לשלישות: משמרת ערב של אורי הלוי ברביעי נפרסת לשבת
 EXTERNAL_OVERRIDES = {
-    (SAT, EVENING): "אורי הלוי",
+    (SAT, EVENING): "אורי הלוי",   # ערב רביעי של אורי הלוי → נפרס לשבת
+    (WED, EVENING): "עומר",          # מילוי החור שנוצר ברביעי ערב
 }
 
 # מחילים את ה-overrides על הלוח הלשלישות (גם להדפסה וגם לאקסל)
@@ -227,9 +233,9 @@ for emp in EMPLOYEES:
 # === Print constraints info ===
 print("\n📌 אילוצים שהוגדרו:")
 print("  יהב: לא עובד השבוע")
-print("  צרפתי: ראשון בוקר ❌ | שני בוקר+ערב ❌ | שלישי ערב ❌")
+print("  צרפתי: רק ראשון לילה + שלישי בוקר (נסגר הצו בשלישי בלילה)")
 print("  משה: לא רביעי, לא שישי. חמישי לילה קבוע.")
-print("  עומר: עדיף לא ראשון בוקר+ערב, לא שני לילה, לא שלישי, עדיף לא רביעי ערב")
+print("  עומר: עדיף לא ראשון בוקר+ערב, לא שני לילה, לא שלישי, עדיף לא רביעי ערב. שישי לילה קבוע.")
 print("  עומרי: רק ראשון ערב, שני בוקר, שלישי לילה, חמישי ערב")
 print("  ניר: הכל חוץ מרביעי ערב+לילה")
 print("  אורי הלוי: מרביעי, קבוע ערב+לילה ברביעי. לשלישות: ערב נפרס לשבת")
