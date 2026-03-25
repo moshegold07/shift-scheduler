@@ -45,6 +45,8 @@ HOLIDAYS = {
 
 # === Fixed assignments (שיבוצים קבועים) ===
 FIXED_ASSIGNMENTS = {
+    # ניר — ראשון בוקר (כדי שיקבל משמרת יום בתחילת השבוע)
+    (SUN, MORNING): "ניר",
     # אורי הלוי — רביעי ערב + לילה
     (WED, EVENING): "אורי הלוי",
     (WED, NIGHT): "אורי הלוי",
@@ -104,8 +106,11 @@ TSARFATI_ALLOWED = {
 CONSTRAINTS = {
     # צרפתי — רק ראשון לילה + שלישי בוקר
     "צרפתי": build_whitelist_constraints(TSARFATI_ALLOWED),
-    # משה — לא רביעי, לא שישי, שבת רק ערב
+    # משה — לא ראשון, לא רביעי, לא שישי, שבת רק ערב
     "משה": [
+        (SUN, MORNING),
+        (SUN, EVENING),
+        (SUN, NIGHT),
         (WED, MORNING),
         (WED, EVENING),
         (WED, NIGHT),
